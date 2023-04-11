@@ -73,6 +73,8 @@ request](https://github.com/greenbone/openvas-scanner/pulls) on GitHub. Bigger
 changes need to be discussed with the development team via the [issues section
 at GitHub](https://github.com/greenbone/openvas-scanner/issues) first.
 
+TODO: describe how to create a working ci environment on a fork.
+
 ## License
 
 This module is licensed under the [GNU General Public License v2.0
