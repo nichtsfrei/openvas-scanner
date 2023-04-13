@@ -64,6 +64,7 @@ issue to the Greenbone Support Portal.
 
 ## Maintainer
 
+;'kf;ak'
 This project is maintained by [Greenbone Networks GmbH](https://www.greenbone.net/).
 
 ## Contributing
