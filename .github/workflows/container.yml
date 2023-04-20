@@ -56,7 +56,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Setup container meta information
+      - name: 'enable tag: version'
+        run: |
+          echo "ENABLE_VERSION=${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}" >> $GITHUB_ENV
+          # set defaults
+          echo "ENABLE_LATEST=false" >> $GITHUB_ENV
+          echo "ENABLE_OLDSTABLE=false" >> $GITHUB_ENV
+          echo "ENABLE_RETAG_STABLE_OLDSTABLE=false" >> $GITHUB_ENV
+      - name: 'set tag related fields ${{ env.ENABLE_VERSION }}'
+        if: ( env.ENABLE_VERSION )
+        run: |
+          # find the latest version that is not ourself
+          export LATEST_VERSION=$(git tag -l | grep -v '${{ github.ref_name }}' | sort -r --version-sort)
+          # get major minor patch versions
+          IFS='.' read -r latest_major latest_minor latest_patch << EOF
+          $LATEST_VERSION
+          EOF
+          IFS='.' read -r tag_major tag_minor tag_patch << EOF
+          ${{ github.ref_name }}
+          EOF
+          # remove leading v
+          latest_major=$(echo $latest_major | cut -c2-)
+          tag_major=$(echo $tag_major | cut -c2-)
+          if [ $tag_major -eq $latest_major ]; then
+            # set this tag to latest and stable
+            echo "ENABLE_LATEST=true" >> $GITHUB_ENV
+          elif [ $tag_major -gt $latest_major ]; then
+            # new major version, retag previous stable to oldstable
+            echo "ENABLE_LATEST=true" >> $GITHUB_ENV
+            echo "ENABLE_RETAG_STABLE_OLDSTABLE=true" >> $GITHUB_ENV
+          else
+            # set this tag to oldstable
+            # can happen on a hotfix
+            echo "ENABLE_OLDSTABLE=true" >> $GITHUB_ENV
+          fi
+      - name: 'Setup meta information (version: ${{ env.ENABLE_VERSION }}, latest: ${{ env.ENABLE_LATEST }}, oldstable: ${{ env.ENABLE_OLDSTABLE }}, retag oldstable : ${{ env.ENABLE_RETAG_STABLE_OLDSTABLE }}'
         id: meta
         uses: docker/metadata-action@v4
         with:
@@ -66,16 +100,15 @@ jobs:
             org.opencontainers.image.base.name=greenbone/gvm-libs
           flavor: latest=false # no auto latest container tag for git tags
           tags: |
-            # use container tag for git tags
-            type=match,pattern=v(.*),group=1
             # use latest for latest tag from stable branch
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v22.4') }}
-            # use stable for latest 22.4 tag
-            type=raw,value=stable,enable=${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v22.4') }}
-            # use oldstable for latest 22.4 tag
-            type=raw,value=oldstable,enable=${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v21.4') }}
-            # use edge for default branch
-            type=edge
+            # verify if both are active
+            type=raw,value=latest,enable=${{ env.ENABLE_LATEST }}
+            type=raw,value=stable,enable=${{ env.ENABLE_LATEST }}
+            type=raw,value=oldstable,enable=${{ env.ENABLE_OLDSTABLE }}
+            type=semver,pattern={{version}},enable=${{ env.ENABLE_VERSION }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ env.ENABLE_VERSION }}
+            type=semver,pattern={{major}},enable=${{ env.ENABLE_VERSION }}
+            type=edge,branch=main
             # use branch-sha otherwise for pushes to branches other then main (will not be uploaded)
             type=raw,value={{branch}}-{{sha}},enable=${{ github.ref_type == 'branch' && github.event_name == 'push' && github.ref_name != 'main' }}
             # use pr-$PR_ID for pull requests (will not be uploaded)
