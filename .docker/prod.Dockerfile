@@ -6,10 +6,23 @@ FROM greenbone/openvas-smb AS openvas-smb
 
 FROM greenbone/gvm-libs:$VERSION AS build
 COPY . /source
+RUN apt-get update && apt-get install --no-install-recommends --no-install-suggests -y \
+    ca-certificates\
+  libpcap-dev libssh-dev zlib1g-dev \
+    curl
+RUN curl -sSf https://sh.rustup.rs -o wtf.sh
+RUN sh wtf.sh --default-toolchain stable -y
+ENV PATH=/root/.cargo/bin:$PATH
+RUN cargo --version
 RUN sh /source/.github/install-openvas-dependencies.sh
 COPY --from=openvas-smb /usr/local/lib/ /usr/local/lib/
 RUN cmake -DCMAKE_BUILD_TYPE=Release -DINSTALL_OLD_SYNC_SCRIPT=OFF -B/build /source
 RUN DESTDIR=/install cmake --build /build -- install
+# TODO find another less scripty way to install that
+WORKDIR /source/rust
+RUN cargo build --release
+RUN mv /source/rust/target/release/nasl-cli /install/usr/local/bin/nasl-cli
+
 
 FROM greenbone/gvm-libs:$VERSION
 ARG TARGETPLATFORM
@@ -39,11 +52,6 @@ RUN apt-get update && apt-get install --no-install-recommends --no-install-sugge
   zlib1g-dev \
   && rm -rf /var/lib/apt/lists/*
 COPY .docker/openvas.conf /etc/openvas/
-# must be pre built within the rust dir and moved to the bin dir
-# usually this image is created within in a ci ensuring that the
-# binary is available.
-COPY bin/nasl-cli/$TARGETPLATFORM/nasl-cli /usr/local/bin/nasl-cli
-RUN chmod a+x /usr/local/bin/nasl-cli
 COPY --from=build /install/ /
 COPY --from=openvas-smb /usr/local/lib/ /usr/local/lib/
 COPY --from=openvas-smb /usr/local/bin/ /usr/local/bin/
