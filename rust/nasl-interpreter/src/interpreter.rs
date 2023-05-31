@@ -8,11 +8,10 @@ use nasl_syntax::{IdentifierType, Statement, Statement::*, Token, TokenCategory,
 use storage::StorageError;
 
 use crate::{
-    call::CallExtension,
     context::{Context, ContextType, Register},
     declare::{DeclareFunctionExtension, DeclareVariableExtension},
     operator::OperatorExtension,
-    InterpretError, InterpretErrorKind, LoadError, NaslValue,
+    InterpretError, InterpretErrorKind, LoadError, NaslValue, lookup_keys::FC_ANON_ARGS, lookup, FunctionError,
 };
 
 /// Used to interpret a Statement
@@ -417,6 +416,68 @@ where
         }
 
         Ok(NaslValue::Null)
+    }
+
+
+    fn call(&mut self, name: &Token, arguments: &[Statement]) -> InterpretResult {
+        let name = &Self::identifier(name)?;
+        // get the context
+        let mut named = HashMap::new();
+        let mut position = vec![];
+        // TODO simplify
+        for p in arguments {
+            match p {
+                NamedParameter(token, val) => {
+                    let val = self.resolve(val)?;
+                    let name = Self::identifier(token)?;
+                    named.insert(name, ContextType::Value(val));
+                }
+                val => {
+                    let val = self.resolve(val)?;
+                    position.push(val);
+                }
+            }
+        }
+        named.insert(
+            FC_ANON_ARGS.to_owned(),
+            ContextType::Value(NaslValue::Array(position)),
+        );
+        self.registrat.create_root_child(named);
+        let result = match lookup(name) {
+            // Built-In Function
+            Some(function) => function(self.registrat, self.ctxconfigs)
+                .map_err(|x| FunctionError::new(name, x).into()),
+            // Check for user defined function
+            None => {
+                let found = self
+                    .registrat
+                    .named(name)
+                    .ok_or_else(|| InterpretError::not_found(name))?
+                    .clone();
+                match found {
+                    ContextType::Function(params, stmt) => {
+                        // prepare default values
+                        for p in params {
+                            match self.registrat.named(&p) {
+                                None => {
+                                    // add default NaslValue::Null for each defined params
+                                    self.registrat
+                                        .add_local(&p, ContextType::Value(NaslValue::Null));
+                                }
+                                Some(_) => {}
+                            }
+                        }
+                        match self.resolve(&stmt)? {
+                            NaslValue::Return(x) => Ok(*x),
+                            a => Ok(a),
+                        }
+                    }
+                    ContextType::Value(_) => Err(InterpretError::expected_function()),
+                }
+            }
+        };
+        self.registrat.drop_last();
+        result
     }
 
     /// Interprets a Statement

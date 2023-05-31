@@ -9,7 +9,6 @@ mod built_in_functions;
 mod error;
 mod naslvalue;
 
-mod call;
 mod context;
 mod declare;
 mod helper;

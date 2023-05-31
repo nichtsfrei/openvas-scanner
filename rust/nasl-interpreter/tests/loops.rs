@@ -6,7 +6,7 @@
 mod tests {
     use nasl_syntax::parse;
 
-    use crate::{DefaultContext, Interpreter, NaslValue, Register};
+    use nasl_interpreter::{DefaultContext, Interpreter, NaslValue, Register};
 
     #[test]
     fn for_loop_test() {
