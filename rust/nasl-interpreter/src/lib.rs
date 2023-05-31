@@ -17,7 +17,6 @@ mod interpreter;
 mod loader;
 mod logger;
 mod lookup_keys;
-mod loop_extension;
 mod operator;
 mod sessions;
 

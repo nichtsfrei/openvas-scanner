@@ -11,7 +11,6 @@ use crate::{
     call::CallExtension,
     context::{Context, ContextType, Register},
     declare::{DeclareFunctionExtension, DeclareVariableExtension},
-    loop_extension::LoopExtension,
     operator::OperatorExtension,
     InterpretError, InterpretErrorKind, LoadError, NaslValue,
 };
@@ -114,6 +113,7 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
+    // TODO remove
     fn handle_array(
         &mut self,
         ridx: usize,
@@ -319,6 +319,106 @@ where
         }
     }
 
+    fn for_loop(
+        &mut self,
+        assignment: &Statement,
+        condition: &Statement,
+        update: &Statement,
+        body: &Statement,
+    ) -> InterpretResult {
+        // Resolve assignment
+        self.resolve(assignment)?;
+
+        loop {
+            // Check condition statement
+            if !bool::from(self.resolve(condition)?) {
+                break;
+            }
+
+            // Execute loop body
+            let ret = self.resolve(body)?;
+            // Catch special values
+            match ret {
+                NaslValue::Break => break,
+                NaslValue::Exit(code) => return Ok(NaslValue::Exit(code)),
+                NaslValue::Return(val) => return Ok(NaslValue::Return(val)),
+                _ => (),
+            };
+
+            // Execute update Statement
+            self.resolve(update)?;
+        }
+
+        Ok(NaslValue::Null)
+    }
+
+    fn for_each_loop(
+        &mut self,
+        variable: &Token,
+        iterable: &Statement,
+        body: &Statement,
+    ) -> InterpretResult {
+        // Get name of the iteration variable
+        let iter_name = match variable.category() {
+            TokenCategory::Identifier(IdentifierType::Undefined(name)) => name,
+            o => return Err(InterpretError::wrong_category(o)),
+        };
+        // Iterate through the iterable Statement
+        for val in Vec::<NaslValue>::from(self.resolve(iterable)?) {
+            // Change the value of the iteration variable after each iteration
+            self.registrat.add_local(iter_name, ContextType::Value(val));
+
+            // Execute loop body
+            let ret = self.resolve(body)?;
+            // Catch special values
+            match ret {
+                NaslValue::Break => break,
+                NaslValue::Exit(code) => return Ok(NaslValue::Exit(code)),
+                NaslValue::Return(val) => return Ok(NaslValue::Return(val)),
+                _ => (),
+            };
+        }
+
+        Ok(NaslValue::Null)
+    }
+
+    fn while_loop(&mut self, condition: &Statement, body: &Statement) -> InterpretResult {
+        while bool::from(self.resolve(condition)?) {
+            // Execute loop body
+            let ret = self.resolve(body)?;
+            // Catch special values
+            match ret {
+                NaslValue::Break => break,
+                NaslValue::Exit(code) => return Ok(NaslValue::Exit(code)),
+                NaslValue::Return(val) => return Ok(NaslValue::Return(val)),
+                _ => (),
+            };
+        }
+
+        Ok(NaslValue::Null)
+    }
+
+    fn repeat_loop(&mut self, body: &Statement, condition: &Statement) -> InterpretResult {
+        loop {
+            // Execute loop body
+            let ret = self.resolve(body)?;
+            // Catch special values
+            match ret {
+                NaslValue::Break => break,
+                NaslValue::Exit(code) => return Ok(NaslValue::Exit(code)),
+                NaslValue::Return(val) => return Ok(NaslValue::Return(val)),
+                _ => (),
+            };
+
+            // Check condition statement
+            if bool::from(self.resolve(condition)?) {
+                break;
+            }
+        }
+
+        Ok(NaslValue::Null)
+    }
+
     /// Interprets a Statement
     pub fn resolve(&mut self, statement: &Statement) -> InterpretResult {
         match statement {
@@ -362,7 +462,7 @@ where
                 Ok(NaslValue::Return(Box::new(rc)))
             }
             Include(inc) => self.include(inc),
-            NamedParameter(_, _) => todo!(),
+            NamedParameter(_, _) => unreachable!("is handled in call"),
             For(assignment, condition, update, body) => {
                 self.for_loop(assignment, condition, update, body)
             }
