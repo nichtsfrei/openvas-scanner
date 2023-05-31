@@ -12,7 +12,6 @@ use crate::{
     call::CallExtension,
     context::{Context, ContextType, Register},
     declare::{DeclareFunctionExtension, DeclareVariableExtension},
-    include::IncludeExtension,
     loop_extension::LoopExtension,
     operator::OperatorExtension,
     InterpretError, InterpretErrorKind, LoadError, NaslValue,
@@ -75,6 +74,27 @@ where
                     Err(e)
                 }
             }
+        }
+    }
+
+
+    fn include(&mut self, name: &Statement) -> InterpretResult {
+        match self.resolve(name)? {
+            NaslValue::String(key) => {
+                let code = self.ctxconfigs.loader().load(&key)?;
+                let mut inter = Interpreter::new(self.registrat, self.ctxconfigs);
+                let result = nasl_syntax::parse(&code)
+                    .map(|parsed| match parsed {
+                        Ok(stmt) => inter.resolve(&stmt),
+                        Err(err) => Err(InterpretError::include_syntax_error(&key, err)),
+                    })
+                    .find(|e| e.is_err());
+                match result {
+                    Some(e) => e,
+                    None => Ok(NaslValue::Null),
+                }
+            }
+            _ => Err(InterpretError::unsupported(name, "string")),
         }
     }
 
