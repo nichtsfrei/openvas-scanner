@@ -10,7 +10,6 @@ mod error;
 mod naslvalue;
 
 mod context;
-mod declare;
 mod helper;
 mod interpreter;
 mod loader;

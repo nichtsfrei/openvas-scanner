@@ -4,12 +4,11 @@
 
 use std::{collections::HashMap, io};
 
-use nasl_syntax::{IdentifierType, Statement, Statement::*, Token, TokenCategory, AssignOrder};
+use nasl_syntax::{IdentifierType, Statement, Statement::*, Token, TokenCategory, AssignOrder, DeclareScope};
 use storage::StorageError;
 
 use crate::{
     context::{Context, ContextType, Register},
-    declare::{DeclareFunctionExtension, DeclareVariableExtension},
     operator::OperatorExtension,
     InterpretError, InterpretErrorKind, LoadError, NaslValue, lookup_keys::FC_ANON_ARGS, lookup, FunctionError,
 };
@@ -478,6 +477,49 @@ where
         };
         self.registrat.drop_last();
         result
+    }
+
+
+    fn declare_function(
+        &mut self,
+        name: &Token,
+        arguments: &[Statement],
+        execution: &Statement,
+    ) -> InterpretResult {
+        let name = &Self::identifier(name)?;
+        let mut names = vec![];
+        for a in arguments {
+            match a {
+                Statement::Variable(token) => {
+                    let param_name = &Self::identifier(token)?;
+                    names.push(param_name.to_owned());
+                }
+                _ => return Err(InterpretError::unsupported(a, "variable")),
+            }
+        }
+        self.registrat
+            .add_global(name, ContextType::Function(names, execution.clone()));
+        Ok(NaslValue::Null)
+    }
+
+
+    fn declare_variable(&mut self, scope: &DeclareScope, stmts: &[Statement]) -> InterpretResult {
+        let mut add = |key: &str| {
+            let value = ContextType::Value(NaslValue::Null);
+            match scope {
+                DeclareScope::Global => self.registrat.add_global(key, value),
+                DeclareScope::Local => self.registrat.add_local(key, value),
+            }
+        };
+
+        for stmt in stmts {
+            if let Statement::Variable(ref token) = stmt {
+                if let TokenCategory::Identifier(name) = token.category() {
+                    add(&name.to_string());
+                }
+            };
+        }
+        Ok(NaslValue::Null)
     }
 
     /// Interprets a Statement
