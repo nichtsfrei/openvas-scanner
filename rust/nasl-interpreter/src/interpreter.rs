@@ -4,13 +4,17 @@
 
 use std::{collections::HashMap, io};
 
-use nasl_syntax::{IdentifierType, Statement, Statement::*, Token, TokenCategory, AssignOrder, DeclareScope};
+use nasl_syntax::{
+    AssignOrder, DeclareScope, IdentifierType, Statement, Statement::*, Token, TokenCategory,
+};
+use regex::Regex;
 use storage::StorageError;
 
 use crate::{
     context::{Context, ContextType, Register},
-    operator::OperatorExtension,
-    InterpretError, InterpretErrorKind, LoadError, NaslValue, lookup_keys::FC_ANON_ARGS, lookup, FunctionError,
+    lookup,
+    lookup_keys::FC_ANON_ARGS,
+    FunctionError, InterpretError, InterpretErrorKind, LoadError, NaslValue,
 };
 
 /// Used to interpret a Statement
@@ -52,6 +56,47 @@ fn prepare_dict(left: NaslValue) -> HashMap<String, NaslValue> {
     }
 }
 
+fn as_i64(left: NaslValue, right: Option<NaslValue>) -> (i64, i64) {
+    (
+        i64::from(&left),
+        right.map(|x| i64::from(&x)).unwrap_or_default(),
+    )
+}
+
+macro_rules! expr {
+    ($e:expr) => {
+        $e
+    };
+}
+macro_rules! num_expr {
+    ($op:tt $left:ident $right:ident) => {
+        {
+        let (left, right) = as_i64($left, $right);
+        let result = expr!(left $op right);
+        Ok(NaslValue::Number(result as i64))
+        }
+    };
+    ($op:expr => $left:ident $right:ident) => {
+        {
+        let (left, right) = as_i64($left, $right);
+        let result = $op(left, right);
+        Ok(NaslValue::Number(result as i64))
+        }
+    };
+}
+
+fn match_regex(a: NaslValue, matches: Option<NaslValue>) -> InterpretResult {
+    let right = matches.map(|x| x.to_string()).unwrap_or_default();
+    match Regex::new(&right) {
+        Ok(c) => Ok(NaslValue::Boolean(c.is_match(&a.to_string()))),
+        Err(_) => Err(InterpretError::unparse_regex(&right)),
+    }
+}
+
+fn not_match_regex(a: NaslValue, matches: Option<NaslValue>) -> InterpretResult {
+    let result = match_regex(a, matches)?;
+    Ok(NaslValue::Boolean(!bool::from(result)))
+}
 
 impl<'a, K> Interpreter<'a, K>
 where
@@ -196,7 +241,6 @@ where
         self.dynamic_return(key, order, lookup, &NaslValue::Null, result)
     }
 
-
     pub(crate) fn identifier(token: &Token) -> Result<String, InterpretError> {
         match token.category() {
             TokenCategory::Identifier(IdentifierType::Undefined(x)) => Ok(x.to_owned()),
@@ -233,7 +277,6 @@ where
             }
         }
     }
-
 
     fn include(&mut self, name: &Statement) -> InterpretResult {
         match self.resolve(name)? {
@@ -417,7 +460,6 @@ where
         Ok(NaslValue::Null)
     }
 
-
     fn call(&mut self, name: &Token, arguments: &[Statement]) -> InterpretResult {
         let name = &Self::identifier(name)?;
         // get the context
@@ -479,7 +521,6 @@ where
         result
     }
 
-
     fn declare_function(
         &mut self,
         name: &Token,
@@ -502,7 +543,6 @@ where
         Ok(NaslValue::Null)
     }
 
-
     fn declare_variable(&mut self, scope: &DeclareScope, stmts: &[Statement]) -> InterpretResult {
         let mut add = |key: &str| {
             let value = ContextType::Value(NaslValue::Null);
@@ -520,6 +560,154 @@ where
             };
         }
         Ok(NaslValue::Null)
+    }
+
+    fn execute(
+        &mut self,
+        stmts: &[Statement],
+        result: impl Fn(NaslValue, Option<NaslValue>) -> InterpretResult,
+    ) -> InterpretResult {
+        // neither empty statements nor statements over 2 arguments should ever happen
+        // because it is handled as a SyntaxError. Therefore we don't double check and
+        // and let it run into a index out of bound panic to immediately escalate.
+        let (left, right) = {
+            let first = self.resolve(&stmts[0])?;
+            if stmts.len() == 1 {
+                (first, None)
+            } else {
+                (first, Some(self.resolve(&stmts[1])?))
+            }
+        };
+        result(left, right)
+    }
+
+    fn operator(&mut self, category: &TokenCategory, stmts: &[Statement]) -> InterpretResult {
+        match category {
+            // number and string
+            TokenCategory::Plus => self.execute(stmts, |a, b| match a {
+                NaslValue::String(x) => {
+                    let right = b.map(|x| x.to_string()).unwrap_or_default();
+                    Ok(NaslValue::String(format!("{x}{right}")))
+                }
+                NaslValue::Data(x) => {
+                    let right: String = b.map(|x| x.to_string()).unwrap_or_default();
+                    let x: String = x.into_iter().map(|b| b as char).collect();
+                    Ok(NaslValue::String(format!("{x}{right}")))
+                }
+                left => {
+                    let right = b.map(|x| i64::from(&x)).unwrap_or_default();
+                    Ok(NaslValue::Number(i64::from(&left) + right))
+                }
+            }),
+            TokenCategory::Minus => self.execute(stmts, |a, b| match a {
+                NaslValue::String(x) => {
+                    let right: String = b.map(|x| x.to_string()).unwrap_or_default();
+                    Ok(NaslValue::String(x.replacen(&right, "", 1)))
+                }
+                NaslValue::Data(x) => {
+                    let right: String = b.map(|x| x.to_string()).unwrap_or_default();
+                    let x: String = x.into_iter().map(|b| b as char).collect();
+                    Ok(NaslValue::String(x.replacen(&right, "", 1)))
+                }
+                left => {
+                    let result = match b {
+                        Some(right) => i64::from(&left) - i64::from(&right),
+                        None => -i64::from(&left),
+                    };
+                    Ok(NaslValue::Number(result))
+                }
+            }),
+            // number
+            TokenCategory::Star => self.execute(stmts, |a, b| num_expr!(* a b)),
+            TokenCategory::Slash => self.execute(stmts, |a, b| num_expr!(/ a b)),
+            TokenCategory::Percent => self.execute(stmts, |a, b| num_expr!(% a b)),
+            TokenCategory::LessLess => self.execute(stmts, |a, b| num_expr!(|a, b| a << b => a b)),
+            TokenCategory::GreaterGreater => {
+                self.execute(stmts, |a, b| num_expr!(|a, b| a >> b => a b))
+            }
+            // let left_casted = left as u32; (left_casted >> right) as i64
+            TokenCategory::GreaterGreaterGreater => self.execute(
+                stmts,
+                |a, b| num_expr!(|a, b| ((a as u32) >> b) as i32 => a b),
+            ),
+            TokenCategory::Ampersand => self.execute(stmts, |a, b| num_expr!(& a b)),
+            TokenCategory::Pipe => self.execute(stmts, |a, b| num_expr!(| a b)),
+            TokenCategory::Caret => self.execute(stmts, |a, b| num_expr!(^ a b)),
+            TokenCategory::StarStar => self.execute(
+                stmts,
+                |a, b| num_expr!(|a, b| (a as u32).pow(b as u32) as i32 => a b),
+            ),
+            TokenCategory::Tilde => {
+                self.execute(stmts, |a, b| num_expr!(|a: i64, _: i64| !a => a b))
+            }
+            // string
+            TokenCategory::EqualTilde => self.execute(stmts, match_regex),
+            TokenCategory::BangTilde => self.execute(stmts, not_match_regex),
+            TokenCategory::GreaterLess => self.execute(stmts, |a, b| {
+                let substr = b.map(|x| x.to_string()).unwrap_or_default();
+                Ok(NaslValue::Boolean(a.to_string().contains(&substr)))
+            }),
+            TokenCategory::GreaterBangLess => self.execute(stmts, |a, b| {
+                let substr = b.map(|x| x.to_string()).unwrap_or_default();
+                Ok(NaslValue::Boolean(!a.to_string().contains(&substr)))
+            }),
+            // bool
+            TokenCategory::Bang => {
+                self.execute(stmts, |a, _| Ok(NaslValue::Boolean(!bool::from(a))))
+            }
+            TokenCategory::AmpersandAmpersand => self.execute(stmts, |a, b| {
+                let right = b.map(bool::from).unwrap_or_default();
+                Ok(NaslValue::Boolean(bool::from(a) && right))
+            }),
+            TokenCategory::PipePipe => self.execute(stmts, |a, b| {
+                let right = b.map(bool::from).unwrap_or_default();
+                Ok(NaslValue::Boolean(bool::from(a) || right))
+            }),
+            TokenCategory::EqualEqual => self.execute(stmts, |a, b| {
+                let right = b.unwrap_or(NaslValue::Null);
+                Ok(NaslValue::Boolean(a == right))
+            }),
+            TokenCategory::BangEqual => self.execute(stmts, |a, b| {
+                let right = b.unwrap_or(NaslValue::Null);
+                Ok(NaslValue::Boolean(a != right))
+            }),
+            TokenCategory::Greater => self.execute(stmts, |a, b| {
+                let right = b.map(|x| i64::from(&x)).unwrap_or_default();
+                Ok(NaslValue::Boolean(i64::from(&a) > right))
+            }),
+            TokenCategory::Less => self.execute(stmts, |a, b| {
+                let right = b.map(|x| i64::from(&x)).unwrap_or_default();
+                Ok(NaslValue::Boolean(i64::from(&a) < right))
+            }),
+            TokenCategory::GreaterEqual => self.execute(stmts, |a, b| {
+                let right = b.map(|x| i64::from(&x)).unwrap_or_default();
+                Ok(NaslValue::Boolean(i64::from(&a) >= right))
+            }),
+            TokenCategory::LessEqual => self.execute(stmts, |a, b| {
+                let right = b.map(|x| i64::from(&x)).unwrap_or_default();
+                Ok(NaslValue::Boolean(i64::from(&a) <= right))
+            }),
+            TokenCategory::X => {
+                // neither empty statements nor statements over 2 arguments should ever happen
+                // because it is handled as a SyntaxError. Therefore we don't double check and
+                // and let it run into a index out of bound panic to immediately escalate.
+                let repeat = {
+                    let last = self.resolve(&stmts[1])?;
+                    i64::from(&last)
+                };
+                if repeat == 0 {
+                    // don't execute;
+                    return Ok(NaslValue::Null);
+                }
+                let repeatable = &stmts[0];
+                for _ in 1..repeat - 1 {
+                    self.resolve(repeatable)?;
+                }
+                self.resolve(repeatable)
+            }
+
+            o => Err(InterpretError::wrong_category(o)),
+        }
     }
 
     /// Interprets a Statement
@@ -650,4 +838,3 @@ where
         self.registrat
     }
 }
-

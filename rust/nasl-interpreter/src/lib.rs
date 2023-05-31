@@ -15,7 +15,6 @@ mod interpreter;
 mod loader;
 mod logger;
 mod lookup_keys;
-mod operator;
 mod sessions;
 
 pub use context::Context;
