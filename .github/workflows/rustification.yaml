@@ -72,6 +72,7 @@ jobs:
           - nasl-cli
     steps:
       - uses: actions/checkout@v3
+  # TODO separate those into own job
   releases:
     runs-on:
      - ubuntu-20.04
