@@ -8,7 +8,7 @@ message ("-- Configuring the Scanner...")
 
 # VERSION: Always include major, minor and patch level.
 project (openvas
-  VERSION 22.7.1
+  VERSION 3.1.4
   LANGUAGES C)
 
 if (POLICY CMP0005)
