@@ -28,6 +28,7 @@ jobs:
       - name: "patch for debian stable"
         run: |
           patchelf --replace-needed libpcap.so.1 libpcap.so.0.8 target/aarch64-unknown-linux-gnu/release/nasl-cli
+          patchelf --replace-needed libpcap.so.1 libpcap.so.0.8 target/x86_64-unknown-linux-gnu/release/nasl-cli
       - name: archive nasl-cli aarch64-unknown-linux-gnu
         uses: actions/upload-artifact@v3
         with:
