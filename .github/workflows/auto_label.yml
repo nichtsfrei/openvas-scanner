@@ -1,0 +1,21 @@
+name: :rocket: to adjust
+
+on:
+  pull_request:
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  conventional-commits:
+    if: (!contains(split('foo,bar', ','), github.actor))
+    name: Report Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+        - name: Report Conventional Commits
+          uses: nichtsfrei/actions/pr-conventional-commit-labeler@v3
+          with:
+            token: ${{ github.token }}
+            configuration_toml: release_tag.toml
+
