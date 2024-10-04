@@ -5,7 +5,7 @@ on: [workflow_call]
 jobs:
   C:
     runs-on: ubuntu-latest
-    container: greenbone/gvm-libs:stable
+    container: greenbone/gvm-libs:edge
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies

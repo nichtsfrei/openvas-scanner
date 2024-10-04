@@ -12,6 +12,7 @@ apt-get update && apt-get install --no-install-recommends --no-install-suggests 
     curl \
     git \
     lcov \
+    pkg-config \
     libgnutls28-dev \
     libgpgme-dev \
     libjson-glib-dev \
@@ -30,6 +31,9 @@ apt-get update && apt-get install --no-install-recommends --no-install-suggests 
     libcurl4 \
     libcurl4-gnutls-dev \
     libhiredis-dev \
+    # should be inside gvm-libs image, however, it is not
+    libssh-4 \
+    libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 curl -L -o cgreen.tar.gz https://github.com/cgreen-devs/cgreen/archive/refs/tags/1.6.2.tar.gz -k
